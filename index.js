@@ -1,24 +1,31 @@
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
-const fs = require("fs");
 const { Client, GatewayIntentBits } = require("discord.js");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
   ]
 });
 
-client.on("ready", () => {
-  console.log("Bot ist online");
+client.once("ready", () => {
+  console.log(`Bot ist online als ${client.user.tag}`);
 });
 
-// ---------- OAUTH ----------
+
+// ---------------- OAUTH ----------------
 
 app.get("/", (req, res) => {
   const authUrl = `https://discord.com/oauth2/authorize?client_id=${process.env.CLIENT_ID}&response_type=code&redirect_uri=${process.env.REDIRECT_URI}&scope=identify%20guilds.join`;
@@ -48,18 +55,12 @@ app.get("/callback", async (req, res) => {
       { headers: { Authorization: `Bearer ${access_token}` } }
     );
 
-    let users = [];
-    if (fs.existsSync("users.json")) {
-      users = JSON.parse(fs.readFileSync("users.json"));
-    }
-
-    if (!users.find(u => u.id === userRes.data.id)) {
-      users.push({
+    await supabase
+      .from("users")
+      .upsert({
         id: userRes.data.id,
-        access_token
+        access_token: access_token
       });
-      fs.writeFileSync("users.json", JSON.stringify(users, null, 2));
-    }
 
     res.send("Du bist registriert!");
   } catch (err) {
@@ -68,16 +69,28 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-// ---------- DJOIN ----------
+
+// ---------------- DJOIN ----------------
 
 client.on("messageCreate", async (message) => {
   if (!message.content.startsWith("!djoin")) return;
 
   const args = message.content.split(" ");
   const guildId = args[1];
+
   if (!guildId) return message.reply("Guild ID fehlt.");
 
-  const users = JSON.parse(fs.readFileSync("users.json"));
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("*");
+
+  if (error) {
+    console.log(error);
+    return message.reply("DB Fehler.");
+  }
+
+  if (!users || users.length === 0)
+    return message.reply("Keine gespeicherten User.");
 
   for (const user of users) {
     try {
