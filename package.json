@@ -1,10 +1,12 @@
 {
   "name": "discord-system",
   "version": "1.0.0",
-  "description": "Discord OAuth + Pull System with Supabase",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
