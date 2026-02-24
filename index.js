@@ -6,17 +6,18 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
+// ---------- SUPABASE ----------
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
+  process.env.SUPABASE_SERVICE_ROLE
 );
 
+// ---------- DISCORD BOT ----------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.MessageContent
   ]
 });
 
@@ -24,14 +25,14 @@ client.once("ready", () => {
   console.log(`Bot ist online als ${client.user.tag}`);
 });
 
-
-// ---------------- OAUTH ----------------
-
+// ---------- OAUTH LOGIN ----------
 app.get("/", (req, res) => {
   const authUrl = `https://discord.com/oauth2/authorize?client_id=${process.env.CLIENT_ID}&response_type=code&redirect_uri=${process.env.REDIRECT_URI}&scope=identify%20guilds.join`;
+
   res.send(`<a href="${authUrl}">Login with Discord</a>`);
 });
 
+// ---------- CALLBACK ----------
 app.get("/callback", async (req, res) => {
   try {
     const code = req.query.code;
@@ -55,12 +56,13 @@ app.get("/callback", async (req, res) => {
       { headers: { Authorization: `Bearer ${access_token}` } }
     );
 
-    await supabase
-      .from("users")
-      .upsert({
+    // 🔥 In Supabase speichern
+    await supabase.from("users").upsert([
+      {
         id: userRes.data.id,
         access_token: access_token
-      });
+      }
+    ]);
 
     res.send("Du bist registriert!");
   } catch (err) {
@@ -69,51 +71,56 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-
-// ---------------- DJOIN ----------------
-
+// ---------- DJOIN COMMAND ----------
 client.on("messageCreate", async (message) => {
   if (!message.content.startsWith("!djoin")) return;
 
   const args = message.content.split(" ");
   const guildId = args[1];
 
-  if (!guildId) return message.reply("Guild ID fehlt.");
-
-  const { data: users, error } = await supabase
-    .from("users")
-    .select("*");
-
-  if (error) {
-    console.log(error);
-    return message.reply("DB Fehler.");
+  if (!guildId) {
+    return message.reply("Guild ID fehlt.");
   }
 
-  if (!users || users.length === 0)
-    return message.reply("Keine gespeicherten User.");
+  try {
+    const { data: users, error } = await supabase
+      .from("users")
+      .select("*");
 
-  for (const user of users) {
-    try {
-      await axios.put(
-        `https://discord.com/api/guilds/${guildId}/members/${user.id}`,
-        { access_token: user.access_token },
-        {
-          headers: {
-            Authorization: `Bot ${process.env.BOT_TOKEN}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-    } catch (err) {
-      console.log("JOIN ERROR:");
-      console.log(err.response?.data || err.message);
+    if (error) {
+      console.log(error);
+      return message.reply("Supabase Fehler.");
     }
-  }
 
-  message.reply("Join Versuch abgeschlossen.");
+    for (const user of users) {
+      try {
+        await axios.put(
+          `https://discord.com/api/guilds/${guildId}/members/${user.id}`,
+          { access_token: user.access_token },
+          {
+            headers: {
+              Authorization: `Bot ${process.env.BOT_TOKEN}`,
+              "Content-Type": "application/json"
+            }
+          }
+        );
+      } catch (err) {
+        console.log("JOIN ERROR:", err.response?.data || err.message);
+      }
+    }
+
+    message.reply("Join Versuch abgeschlossen.");
+  } catch (err) {
+    console.log(err);
+    message.reply("Fehler beim Join.");
+  }
 });
 
+// ---------- START ----------
 client.login(process.env.BOT_TOKEN);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server läuft"));
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Server läuft");
+});
